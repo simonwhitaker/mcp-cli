@@ -7,8 +7,9 @@ use std::{
 use anyhow::{Context, Result, bail};
 use nu_ansi_term::{Color, Style};
 use reedline::{
-    Completer, DefaultHinter, DefaultPrompt, DefaultPromptSegment, ExampleHighlighter,
-    FileBackedHistory, Reedline, Signal, Span, Suggestion,
+    ColumnarMenu, Completer, DefaultHinter, DefaultPrompt, DefaultPromptSegment, Emacs,
+    ExampleHighlighter, FileBackedHistory, KeyCode, KeyModifiers, MenuBuilder, Reedline,
+    ReedlineEvent, ReedlineMenu, Signal, Span, Suggestion, default_emacs_keybindings,
 };
 use rmcp::model::Tool;
 use serde_json::{Map, Value, json};
@@ -23,6 +24,7 @@ use crate::{
 const COMMANDS: &[&str] = &[
     "help", "info", "tools", "schema", "tool", "raw", "reload", "quit", "exit",
 ];
+const COMPLETION_MENU: &str = "completion_menu";
 
 #[derive(Debug, Error)]
 pub enum ReplError {
@@ -92,14 +94,7 @@ impl Repl {
             DefaultPromptSegment::Empty,
         );
 
-        let mut editor = Reedline::create()
-            .with_completer(Box::new(InspectorCompleter::new(completion_state.clone())))
-            .with_hinter(Box::new(DefaultHinter::default()))
-            .with_highlighter(Box::new(ExampleHighlighter::new(
-                COMMANDS.iter().map(|command| command.to_string()).collect(),
-            )))
-            .with_partial_completions(true)
-            .with_quick_completions(true);
+        let mut editor = build_editor(completion_state.clone());
 
         if let Some(path) = history_path.or_else(default_history_path) {
             if let Some(parent) = path.parent() {
@@ -230,6 +225,32 @@ impl Repl {
             self.completion_state.clone(),
         )));
     }
+}
+
+fn build_editor(completion_state: CompletionState) -> Reedline {
+    let mut keybindings = default_emacs_keybindings();
+    keybindings.add_binding(
+        KeyModifiers::NONE,
+        KeyCode::Tab,
+        ReedlineEvent::UntilFound(vec![
+            ReedlineEvent::Menu(COMPLETION_MENU.to_string()),
+            ReedlineEvent::MenuNext,
+        ]),
+    );
+
+    let completion_menu = Box::new(ColumnarMenu::default().with_name(COMPLETION_MENU));
+    let edit_mode = Box::new(Emacs::new(keybindings));
+
+    Reedline::create()
+        .with_completer(Box::new(InspectorCompleter::new(completion_state)))
+        .with_menu(ReedlineMenu::EngineCompleter(completion_menu))
+        .with_edit_mode(edit_mode)
+        .with_hinter(Box::new(DefaultHinter::default()))
+        .with_highlighter(Box::new(ExampleHighlighter::new(
+            COMMANDS.iter().map(|command| command.to_string()).collect(),
+        )))
+        .with_partial_completions(true)
+        .with_quick_completions(true)
 }
 
 #[derive(Debug, Clone, PartialEq)]
