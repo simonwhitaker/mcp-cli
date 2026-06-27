@@ -13,7 +13,7 @@ use serde_json::{Map, Value};
 
 use crate::{
     client_handler::InspectorClient,
-    transport::{TransportConfig, stdio_transport},
+    transport::{TransportConfig, stdio_transport, streamable_http_transport},
 };
 
 pub struct McpSession {
@@ -24,21 +24,37 @@ pub struct McpSession {
 
 impl McpSession {
     pub async fn connect(config: &TransportConfig, debug: bool) -> Result<Self> {
-        let transport = stdio_transport(config)
-            .with_context(|| format!("failed to spawn MCP server: {}", config.display_name()))?;
         let handler = InspectorClient::new(debug);
-        let running = handler
-            .clone()
-            .serve(transport)
-            .await
-            .context("failed to initialize MCP server")?;
-        let mut session = Self {
-            running,
-            handler,
-            tools: Vec::new(),
-        };
-        session.refresh().await?;
-        Ok(session)
+
+        match config {
+            TransportConfig::Stdio { command, args } => {
+                let transport = stdio_transport(command, args).with_context(|| {
+                    format!("failed to spawn MCP server: {}", config.display_name())
+                })?;
+                let running = handler
+                    .clone()
+                    .serve(transport)
+                    .await
+                    .context("failed to initialize MCP stdio server")?;
+                Self::from_running(running, handler).await
+            }
+            TransportConfig::StreamableHttp {
+                url,
+                headers,
+                bearer_token,
+            } => {
+                let transport = streamable_http_transport(url, headers, bearer_token.as_deref())
+                    .with_context(|| {
+                        format!("failed to configure MCP Streamable HTTP transport: {url}")
+                    })?;
+                let running = handler
+                    .clone()
+                    .serve(transport)
+                    .await
+                    .context("failed to initialize MCP Streamable HTTP server")?;
+                Self::from_running(running, handler).await
+            }
+        }
     }
 
     pub async fn from_running(

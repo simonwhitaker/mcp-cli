@@ -1,8 +1,6 @@
 use anyhow::Result;
 use clap::Parser;
-use mcp_cli::{
-    cli::Cli, format::Formatter, repl::Repl, session::McpSession, transport::TransportConfig,
-};
+use mcp_cli::{cli::Cli, format::Formatter, repl::Repl, session::McpSession};
 use tracing_subscriber::{EnvFilter, fmt};
 
 #[tokio::main]
@@ -10,7 +8,7 @@ async fn main() -> Result<()> {
     let cli = Cli::parse();
     init_tracing(cli.debug);
 
-    let transport = TransportConfig::stdio(cli.server_command)?;
+    let transport = cli.transport_config()?;
     let formatter = Formatter::new(!cli.no_color, cli.json);
     let mut session = McpSession::connect(&transport, cli.debug).await?;
     let server_info = session.server_info()?;
