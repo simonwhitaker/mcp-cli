@@ -59,10 +59,31 @@ Add headers with repeated `--header NAME=VALUE` options:
 mcp http://localhost:8000/mcp --header X-Tenant=dev
 ```
 
-Use `--bearer-token` for bearer auth:
+For bearer auth, avoid putting the token itself on the command line. Use one of
+these token sources instead.
+
+Read from an environment variable:
 
 ```sh
-mcp https://example.com/mcp --bearer-token "$TOKEN"
+mcp https://example.com/mcp --bearer-token-env EXAMPLE_MCP_TOKEN
+```
+
+The variable name is safe to keep in shell history. The variable value still has
+the normal exposure tradeoffs of environment variables.
+
+Read from a file:
+
+```sh
+mcp https://example.com/mcp --bearer-token-file ~/.config/mcp-cli/example.token
+```
+
+The file should contain only the token. Trailing whitespace is trimmed. Set file
+permissions appropriately, for example with `chmod 600`.
+
+Prompt without echoing input:
+
+```sh
+mcp https://example.com/mcp --bearer-token-prompt
 ```
 
 The first target argument determines the transport. If it starts with
@@ -77,10 +98,14 @@ target as a stdio command and arguments.
 --history <PATH>        Path to the REPL history file
 --no-color              Disable ANSI colors
 --header <NAME=VALUE>   Send an HTTP header with every request
---bearer-token <TOKEN>  Use bearer authentication for HTTP
+--bearer-token-env VAR  Read bearer token from an environment variable
+--bearer-token-file PATH
+                        Read bearer token from a file
+--bearer-token-prompt   Prompt for bearer token without echoing input
 ```
 
-`--header` and `--bearer-token` are only valid with an HTTP(S) target.
+`--header` and bearer token options are only valid with an HTTP(S) target. Use
+only one bearer token source at a time.
 
 ## REPL Commands
 
