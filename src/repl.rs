@@ -11,7 +11,6 @@ use reedline::{
     ExampleHighlighter, FileBackedHistory, KeyCode, KeyModifiers, MenuBuilder, Reedline,
     ReedlineEvent, ReedlineMenu, Signal, Span, Suggestion, default_emacs_keybindings,
 };
-use rmcp::model::{Resource, Tool};
 use serde_json::{Map, Value, json};
 use thiserror::Error;
 
@@ -71,7 +70,7 @@ const COMMANDS: &[CommandSpec] = &[
         name: "resource",
         aliases: &[],
         usage_hint: Some("resource RESOURCE"),
-        description: "Show a resource's contents",
+        description: "Show details of a resource",
     },
     CommandSpec {
         name: "schema",
@@ -83,31 +82,37 @@ const COMMANDS: &[CommandSpec] = &[
         name: "tool",
         aliases: &[],
         usage_hint: Some("tool TOOL [key=value ... | --json '{...}' | @file.json]"),
-        description: "Call a tool with arguments specified as key=value pairs, raw JSON, or a JSON file.",
+        description: "Call a tool with arguments specified as key=value pairs, raw JSON, or a JSON file",
     },
     CommandSpec {
         name: "raw",
         aliases: &[],
         usage_hint: Some("raw METHOD [JSON]"),
-        description: "Send a raw MCP request with optional JSON parameters.",
+        description: "Send a raw MCP request with optional JSON parameters",
     },
     CommandSpec {
         name: "reload",
         aliases: &[],
         usage_hint: None,
-        description: "Refresh tool metadata from the server.",
+        description: "Refresh tool metadata from the server",
     },
     CommandSpec {
         name: "quit",
         aliases: &["exit"],
         usage_hint: None,
-        description: "Close the session and exit the REPL.",
+        description: "Close the session and exit the REPL",
     },
     CommandSpec {
         name: "prompts",
         aliases: &[],
         usage_hint: None,
-        description: "List available prompts.",
+        description: "List available prompts",
+    },
+    CommandSpec {
+        name: "prompt",
+        aliases: &[],
+        usage_hint: Some("prompt NAME"),
+        description: "Show details of a prompt",
     },
 ];
 
@@ -131,16 +136,19 @@ pub struct CompletionState {
     tool_names: Vec<String>,
     tool_args: Vec<(String, Vec<String>)>,
     resource_uris: Vec<String>,
+    prompt_names: Vec<String>,
 }
 
 impl CompletionState {
-    pub fn from_mcp_primitives(tools: &[Tool], resources: &[Resource]) -> Self {
-        let mut tool_names = tools
+    pub fn from_session(session: &McpSession) -> Self {
+        let mut tool_names = session
+            .tools()
             .iter()
             .map(|tool| tool.name.to_string())
             .collect::<Vec<_>>();
         tool_names.sort();
-        let tool_args = tools
+        let tool_args = session
+            .tools()
             .iter()
             .map(|tool| {
                 (
@@ -150,16 +158,25 @@ impl CompletionState {
             })
             .collect();
 
-        let mut resource_uris = resources
+        let mut resource_uris = session
+            .resources()
             .iter()
             .map(|resource| resource.uri.to_string())
             .collect::<Vec<_>>();
         resource_uris.sort();
 
+        let mut prompt_names = session
+            .prompts()
+            .iter()
+            .map(|prompt| prompt.name.to_string())
+            .collect::<Vec<_>>();
+        prompt_names.sort();
+
         Self {
             tool_names,
             tool_args,
             resource_uris,
+            prompt_names,
         }
     }
 
@@ -175,12 +192,11 @@ impl CompletionState {
 impl Repl {
     pub fn new(
         server_name: &str,
-        tools: &[Tool],
-        resources: &[Resource],
+        session: &McpSession,
         history_path: Option<PathBuf>,
         formatter: Formatter,
     ) -> Result<Self> {
-        let completion_state = CompletionState::from_mcp_primitives(tools, resources);
+        let completion_state = CompletionState::from_session(session);
         let prompt_text = if server_name.is_empty() {
             "mcp".to_string()
         } else {
@@ -283,13 +299,16 @@ impl Repl {
             }
             ReplCommand::Reload => {
                 session.refresh().await?;
-                self.completion_state =
-                    CompletionState::from_mcp_primitives(session.tools(), session.resources());
+                self.completion_state = CompletionState::from_session(session);
                 self.rebuild_editor_completer();
                 println!("reloaded {} tools", session.tools().len());
             }
             ReplCommand::Prompts => {
                 println!("{}", self.formatter.prompts(session.prompts()));
+            }
+            ReplCommand::Prompt { name } => {
+                let result = session.get_prompt(&name).await?;
+                println!("{}", self.formatter.prompt(&result));
             }
             ReplCommand::Quit => return Ok(Dispatch::Quit),
         }
@@ -386,6 +405,9 @@ pub enum ReplCommand {
         uri: String,
     },
     Prompts,
+    Prompt {
+        name: String,
+    },
     Reload,
     Quit,
 }
@@ -419,6 +441,10 @@ pub fn parse_command(line: &str) -> Result<ReplCommand> {
         "reload" => Ok(ReplCommand::Reload),
         "quit" | "exit" => Ok(ReplCommand::Quit),
         "prompts" => Ok(ReplCommand::Prompts),
+        "prompt" => {
+            let name = expect_one(rest, "prompt NAME")?;
+            Ok(ReplCommand::Prompt { name })
+        }
         other => bail!("unknown command: {other}"),
     }
 }
@@ -613,6 +639,14 @@ impl InspectorCompleter {
                 .resource_uris
                 .iter()
                 .filter(|uri| uri.starts_with(partial.as_str()))
+                .cloned()
+                .collect(),
+            [command] if ends_with_space && command == "prompt" => self.state.prompt_names.clone(),
+            [command, partial] if !ends_with_space && command == "prompt" => self
+                .state
+                .prompt_names
+                .iter()
+                .filter(|name| name.starts_with(partial.as_str()))
                 .cloned()
                 .collect(),
             [command] if ends_with_space && command == "schema" => self.state.tool_names.clone(),

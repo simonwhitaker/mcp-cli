@@ -2,7 +2,8 @@ use std::fmt::Write;
 
 use nu_ansi_term::{Color, Style};
 use rmcp::model::{
-    CallToolResult, Content, RawContent, RawResource, Resource, ResourceContents, ServerInfo, Tool,
+    CallToolResult, Content, Prompt, RawContent, RawResource, Resource, ResourceContents,
+    ServerInfo, Tool,
 };
 use serde::Serialize;
 use serde_json::{Map, Value};
@@ -217,6 +218,24 @@ impl Formatter {
                 blob.len()
             ),
         }
+    }
+
+    pub fn prompt(&self, prompt: &Prompt) -> String {
+        let mut output = format!(
+            "{} {} {}\n",
+            self.label("prompt"),
+            prompt.name,
+            self.dim(prompt.description.as_deref().unwrap_or("<no description>"))
+        );
+        if let Some(args) = &prompt.arguments {
+            let _ = writeln!(
+                output,
+                "{} {}",
+                self.label("arguments"),
+                self.json_value(args)
+            );
+        }
+        output
     }
 
     pub fn json_value<T: Serialize + ?Sized>(&self, value: &T) -> String {

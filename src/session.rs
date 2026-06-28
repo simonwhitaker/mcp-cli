@@ -169,6 +169,14 @@ impl McpSession {
             .clone())
     }
 
+    pub async fn get_prompt(&self, name: &str) -> Result<Prompt> {
+        self.prompts
+            .iter()
+            .find(|prompt| prompt.name == name)
+            .cloned()
+            .with_context(|| format!("prompt not found: {name}"))
+    }
+
     pub async fn raw_request(&self, method: String, params: Option<Value>) -> Result<Value> {
         let result = self
             .running

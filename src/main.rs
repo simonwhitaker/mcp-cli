@@ -20,13 +20,7 @@ async fn main() -> Result<()> {
     let server_name = server_info.server_info.name.to_string();
     drop(server_info);
 
-    let mut repl = Repl::new(
-        &server_name,
-        session.tools(),
-        session.resources(),
-        cli.history,
-        formatter,
-    )?;
+    let mut repl = Repl::new(&server_name, &session, cli.history, formatter)?;
     let result = repl.run(&mut session).await;
     session.close().await?;
     result
