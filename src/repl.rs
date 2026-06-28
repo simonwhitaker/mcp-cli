@@ -535,7 +535,7 @@ fn help_text(formatter: Formatter) -> String {
     }
     let mut doc_strings = COMMANDS
         .iter()
-        .map(|command| command.doc_string())
+        .map(|command| format!("  {}", command.doc_string()))
         .collect::<Vec<_>>();
     doc_strings.sort();
     ["Commands:", doc_strings.join("\n").as_str(), ""].join("\n")
