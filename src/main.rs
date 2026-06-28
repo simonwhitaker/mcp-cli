@@ -11,14 +11,14 @@ async fn main() -> Result<()> {
     let transport = cli.transport_config()?;
     let formatter = Formatter::new(!cli.no_color, cli.json);
     let mut session = McpSession::connect(&transport, cli.debug).await?;
-    let server_info = session.server_info()?;
-    println!(
-        "{}",
-        formatter.server_intro(&server_info, session.tools().len())
-    );
-
-    let server_name = server_info.server_info.name.to_string();
-    drop(server_info);
+    let server_name = {
+        let server_info = session.server_info()?;
+        println!(
+            "{}",
+            formatter.server_intro(&server_info, session.tools().len())
+        );
+        server_info.server_info.name.to_string()
+    };
 
     let mut repl = Repl::new(&server_name, &session, cli.history, formatter)?;
     let result = repl.run(&mut session).await;
