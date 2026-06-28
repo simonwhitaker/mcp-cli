@@ -4,8 +4,8 @@ use anyhow::{Context, Result, bail};
 use rmcp::{
     RoleClient, ServiceExt,
     model::{
-        CallToolRequestParams, CallToolResult, ClientRequest, CustomRequest, ServerInfo,
-        ServerResult, Tool,
+        CallToolRequestParams, CallToolResult, ClientRequest, CustomRequest,
+        ReadResourceRequestParams, Resource, ResourceContents, ServerInfo, ServerResult, Tool,
     },
     service::{RunningService, ServiceError},
 };
@@ -20,6 +20,7 @@ pub struct McpSession {
     running: RunningService<RoleClient, InspectorClient>,
     handler: InspectorClient,
     tools: Vec<Tool>,
+    resources: Vec<Resource>,
 }
 
 impl McpSession {
@@ -65,6 +66,7 @@ impl McpSession {
             running,
             handler,
             tools: Vec::new(),
+            resources: Vec::new(),
         };
         session.refresh().await?;
         Ok(session)
@@ -81,6 +83,10 @@ impl McpSession {
         &self.tools
     }
 
+    pub fn resources(&self) -> &[Resource] {
+        &self.resources
+    }
+
     pub fn tool(&self, name: &str) -> Option<&Tool> {
         self.tools.iter().find(|tool| tool.name == name)
     }
@@ -93,6 +99,15 @@ impl McpSession {
             .await
             .context("failed to list tools")?;
         self.tools.sort_by(|a, b| a.name.cmp(&b.name));
+
+        self.resources = self
+            .running
+            .peer()
+            .list_all_resources()
+            .await
+            .context("failed to list resources")?;
+        self.resources.sort_by(|a, b| a.name.cmp(&b.name));
+
         Ok(())
     }
 
@@ -113,6 +128,20 @@ impl McpSession {
             })
             .await
             .with_context(|| format!("tool call failed: {name}"))
+    }
+
+    pub async fn get_resource(&self, uri: &str) -> Result<ResourceContents> {
+        let result = self
+            .running
+            .peer()
+            .read_resource(ReadResourceRequestParams::new(uri.to_string()))
+            .await
+            .context(format!("failed to load resource: {uri}"))?;
+        Ok(result
+            .contents
+            .first()
+            .context(format!("resource {uri} has no contents"))?
+            .clone())
     }
 
     pub async fn raw_request(&self, method: String, params: Option<Value>) -> Result<Value> {

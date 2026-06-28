@@ -2,7 +2,7 @@ use std::fmt::Write;
 
 use nu_ansi_term::{Color, Style};
 use rmcp::model::{
-    CallToolResult, Content, RawContent, RawResource, ResourceContents, ServerInfo, Tool,
+    CallToolResult, Content, RawContent, RawResource, Resource, ResourceContents, ServerInfo, Tool,
 };
 use serde::Serialize;
 use serde_json::{Map, Value};
@@ -64,12 +64,8 @@ impl Formatter {
             return "No tools advertised by this server.\n".to_string();
         }
 
-        let width = tools
-            .iter()
-            .map(|tool| tool.name.len())
-            .max()
-            .unwrap_or(4)
-            .clamp(4, 36);
+        let width = self.width(tools, |tool| tool.name.len(), None, None);
+
         let mut output = String::new();
         for tool in tools {
             let description = tool.description.as_deref().unwrap_or("");
@@ -84,6 +80,49 @@ impl Formatter {
             );
         }
         output
+    }
+
+    pub fn resources(&self, resources: &[Resource]) -> String {
+        if self.json {
+            return self.json_value(resources);
+        }
+        if resources.is_empty() {
+            return "No resources advertised by this server.\n".to_string();
+        }
+
+        let width = self.width(resources, |resource| resource.uri.len(), None, None);
+        let mut output = String::new();
+        for resource in resources {
+            let description = resource.description.as_deref().unwrap_or("");
+            let _ = writeln!(
+                output,
+                "{:<width$}  {}",
+                self.accent(resource.uri.as_ref()),
+                description,
+                width = width + ansi_extra(&self.accent(resource.uri.as_ref()), resource.uri.len())
+            );
+        }
+        output
+    }
+
+    fn width<T, F>(
+        &self,
+        items: &[T],
+        item_width_fn: F,
+        min: Option<usize>,
+        max: Option<usize>,
+    ) -> usize
+    where
+        F: Fn(&T) -> usize,
+    {
+        let min = min.unwrap_or(4);
+        let max = max.unwrap_or(36);
+        items
+            .iter()
+            .map(item_width_fn)
+            .max()
+            .unwrap_or(min)
+            .clamp(min, max)
     }
 
     pub fn schema(&self, tool: &Tool) -> String {
@@ -192,7 +231,7 @@ impl Formatter {
         }
     }
 
-    fn resource(&self, resource: &ResourceContents) -> String {
+    pub fn resource(&self, resource: &ResourceContents) -> String {
         match resource {
             ResourceContents::TextResourceContents {
                 uri,

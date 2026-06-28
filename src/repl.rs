@@ -11,7 +11,7 @@ use reedline::{
     ExampleHighlighter, FileBackedHistory, KeyCode, KeyModifiers, MenuBuilder, Reedline,
     ReedlineEvent, ReedlineMenu, Signal, Span, Suggestion, default_emacs_keybindings,
 };
-use rmcp::model::Tool;
+use rmcp::model::{Resource, Tool};
 use serde_json::{Map, Value, json};
 use thiserror::Error;
 
@@ -22,7 +22,17 @@ use crate::{
 };
 
 const COMMANDS: &[&str] = &[
-    "help", "info", "tools", "schema", "tool", "raw", "reload", "quit", "exit",
+    "help",
+    "info",
+    "tools",
+    "resources",
+    "schema",
+    "tool",
+    "resource",
+    "raw",
+    "reload",
+    "quit",
+    "exit",
 ];
 const COMPLETION_MENU: &str = "completion_menu";
 
@@ -43,10 +53,11 @@ pub struct Repl {
 pub struct CompletionState {
     tool_names: Vec<String>,
     tool_args: Vec<(String, Vec<String>)>,
+    resource_uris: Vec<String>,
 }
 
 impl CompletionState {
-    pub fn from_tools(tools: &[Tool]) -> Self {
+    pub fn from_mcp_primitives(tools: &[Tool], resources: &[Resource]) -> Self {
         let mut tool_names = tools
             .iter()
             .map(|tool| tool.name.to_string())
@@ -61,9 +72,17 @@ impl CompletionState {
                 )
             })
             .collect();
+
+        let mut resource_uris = resources
+            .iter()
+            .map(|resource| resource.uri.to_string())
+            .collect::<Vec<_>>();
+        resource_uris.sort();
+
         Self {
             tool_names,
             tool_args,
+            resource_uris,
         }
     }
 
@@ -80,10 +99,11 @@ impl Repl {
     pub fn new(
         server_name: &str,
         tools: &[Tool],
+        resources: &[Resource],
         history_path: Option<PathBuf>,
         formatter: Formatter,
     ) -> Result<Self> {
-        let completion_state = CompletionState::from_tools(tools);
+        let completion_state = CompletionState::from_mcp_primitives(tools, resources);
         let prompt_text = if server_name.is_empty() {
             "mcp".to_string()
         } else {
@@ -163,11 +183,18 @@ impl Repl {
             ReplCommand::Tools => {
                 println!("{}", self.formatter.tools(session.tools()));
             }
+            ReplCommand::Resources => {
+                println!("{}", self.formatter.resources(session.resources()));
+            }
             ReplCommand::Schema { tool } => {
                 let tool = session
                     .tool(&tool)
                     .with_context(|| format!("unknown tool: {tool}"))?;
                 println!("{}", self.formatter.schema(tool));
+            }
+            ReplCommand::Resource { uri } => {
+                let result = session.get_resource(&uri).await?;
+                println!("{}", self.formatter.resource(&result));
             }
             ReplCommand::Tool { name, arguments } => {
                 let result = session.call_tool(&name, arguments).await?;
@@ -179,7 +206,8 @@ impl Repl {
             }
             ReplCommand::Reload => {
                 session.refresh().await?;
-                self.completion_state = CompletionState::from_tools(session.tools());
+                self.completion_state =
+                    CompletionState::from_mcp_primitives(session.tools(), session.resources());
                 self.rebuild_editor_completer();
                 println!("reloaded {} tools", session.tools().len());
             }
@@ -269,6 +297,10 @@ pub enum ReplCommand {
         method: String,
         params: Option<Value>,
     },
+    Resources,
+    Resource {
+        uri: String,
+    },
     Reload,
     Quit,
 }
@@ -288,6 +320,11 @@ pub fn parse_command(line: &str) -> Result<ReplCommand> {
         "help" | "?" => Ok(ReplCommand::Help),
         "info" => Ok(ReplCommand::Info),
         "tools" => Ok(ReplCommand::Tools),
+        "resources" => Ok(ReplCommand::Resources),
+        "resource" => {
+            let uri = expect_one(rest, "resource RESOURCE")?;
+            Ok(ReplCommand::Resource { uri })
+        }
         "schema" => {
             let tool = expect_one(rest, "schema TOOL")?;
             Ok(ReplCommand::Schema { tool })
@@ -424,6 +461,8 @@ fn help_text(formatter: Formatter) -> String {
         "  help                         Show this help",
         "  info                         Show server metadata and capabilities",
         "  tools                        List tools",
+        "  resources                    List resources",
+        "  resource URI                 Show a resource's contents",
         "  schema TOOL                  Pretty-print a tool input schema",
         "  tool TOOL key=value ...       Call a tool",
         "  tool TOOL --json '{...}'      Call a tool with raw JSON arguments",
@@ -482,6 +521,16 @@ impl InspectorCompleter {
                 .arg_names(tool)
                 .into_iter()
                 .map(|arg| format!("{arg}="))
+                .collect(),
+            [command] if ends_with_space && command == "resource" => {
+                self.state.resource_uris.clone()
+            }
+            [command, partial] if command == "resource" && !ends_with_space => self
+                .state
+                .resource_uris
+                .iter()
+                .filter(|uri| uri.starts_with(partial.as_str()))
+                .cloned()
                 .collect(),
             [command] if ends_with_space && command == "schema" => self.state.tool_names.clone(),
             [command, partial] if command == "schema" && !ends_with_space => self
