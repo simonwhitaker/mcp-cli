@@ -21,19 +21,90 @@ use crate::{
     session::{McpSession, object_from_value},
 };
 
-const COMMANDS: &[&str] = &[
-    "help",
-    "info",
-    "tools",
-    "resources",
-    "schema",
-    "tool",
-    "resource",
-    "raw",
-    "reload",
-    "quit",
-    "exit",
+struct CommandSpec {
+    name: &'static str,
+    aliases: &'static [&'static str],
+    usage_hint: Option<&'static str>,
+    description: &'static str,
+}
+
+impl CommandSpec {
+    fn doc_string(&self) -> String {
+        let mut doc = String::new();
+        let mut entry = self.usage_hint.unwrap_or(self.name).to_string();
+        for alias in self.aliases {
+            entry.push_str(", ");
+            entry.push_str(alias);
+        }
+        doc.push_str(format!("{:30} ", entry).as_str());
+        doc.push_str(self.description);
+        doc
+    }
+}
+
+const COMMANDS: &[CommandSpec] = &[
+    CommandSpec {
+        name: "help",
+        aliases: &["?"],
+        usage_hint: None,
+        description: "Show this help",
+    },
+    CommandSpec {
+        name: "info",
+        aliases: &[],
+        usage_hint: None,
+        description: "Show server metadata and capabilities",
+    },
+    CommandSpec {
+        name: "tools",
+        aliases: &[],
+        usage_hint: None,
+        description: "List tools",
+    },
+    CommandSpec {
+        name: "resources",
+        aliases: &[],
+        usage_hint: None,
+        description: "List resources",
+    },
+    CommandSpec {
+        name: "resource",
+        aliases: &[],
+        usage_hint: Some("resource RESOURCE"),
+        description: "Show a resource's contents",
+    },
+    CommandSpec {
+        name: "schema",
+        aliases: &[],
+        usage_hint: Some("schema TOOL"),
+        description: "Pretty-print a tool input schema",
+    },
+    CommandSpec {
+        name: "tool",
+        aliases: &[],
+        usage_hint: Some("tool TOOL [key=value ... | --json '{...}' | @file.json]"),
+        description: "Call a tool with arguments specified as key=value pairs, raw JSON, or a JSON file.",
+    },
+    CommandSpec {
+        name: "raw",
+        aliases: &[],
+        usage_hint: Some("raw METHOD [JSON]"),
+        description: "Send a raw MCP request with optional JSON parameters.",
+    },
+    CommandSpec {
+        name: "reload",
+        aliases: &[],
+        usage_hint: None,
+        description: "Refresh tool metadata from the server.",
+    },
+    CommandSpec {
+        name: "quit",
+        aliases: &["exit"],
+        usage_hint: None,
+        description: "Close the session and exit the REPL.",
+    },
 ];
+
 const COMPLETION_MENU: &str = "completion_menu";
 
 #[derive(Debug, Error)]
@@ -275,7 +346,11 @@ fn build_editor(completion_state: CompletionState) -> Reedline {
         .with_edit_mode(edit_mode)
         .with_hinter(Box::new(DefaultHinter::default()))
         .with_highlighter(Box::new(ExampleHighlighter::new(
-            COMMANDS.iter().map(|command| command.to_string()).collect(),
+            // TODO: also include aliases here?
+            COMMANDS
+                .iter()
+                .map(|command| command.name.to_string())
+                .collect(),
         )))
         .with_partial_completions(true)
         .with_quick_completions(true)
@@ -448,31 +523,22 @@ fn expect_one(words: &[String], usage: &str) -> Result<String> {
 fn help_text(formatter: Formatter) -> String {
     if formatter.json_mode() {
         return formatter.json_value(&json!({
-            "commands": COMMANDS,
-            "toolSyntax": [
-                "tool TOOL key=value nested.key=value",
-                "tool TOOL --json '{\"key\":\"value\"}'",
-                "tool TOOL @args.json"
-            ]
+            "commands": COMMANDS.iter().map(|command| {
+                json!({
+                    "name": command.name,
+                    "aliases": command.aliases,
+                    "usage_hint": &command.usage_hint.unwrap_or(""),
+                    "description": command.description,
+                })
+            }).collect::<Vec<_>>()
         }));
     }
-    [
-        "Commands:",
-        "  help                         Show this help",
-        "  info                         Show server metadata and capabilities",
-        "  tools                        List tools",
-        "  resources                    List resources",
-        "  resource URI                 Show a resource's contents",
-        "  schema TOOL                  Pretty-print a tool input schema",
-        "  tool TOOL key=value ...       Call a tool",
-        "  tool TOOL --json '{...}'      Call a tool with raw JSON arguments",
-        "  tool TOOL @args.json          Call a tool with JSON arguments from a file",
-        "  raw METHOD [JSON]             Send a raw MCP request",
-        "  reload                       Refresh tool metadata",
-        "  quit | exit                   Close the session",
-        "",
-    ]
-    .join("\n")
+    let mut doc_strings = COMMANDS
+        .iter()
+        .map(|command| command.doc_string())
+        .collect::<Vec<_>>();
+    doc_strings.sort();
+    ["Commands:", doc_strings.join("\n").as_str(), ""].join("\n")
 }
 
 #[derive(Debug, Clone)]
@@ -485,7 +551,10 @@ impl InspectorCompleter {
     fn new(state: CompletionState) -> Self {
         Self {
             state,
-            command_set: COMMANDS.iter().map(|command| command.to_string()).collect(),
+            command_set: COMMANDS
+                .iter()
+                .map(|command| command.name.to_string())
+                .collect(),
         }
     }
 
@@ -495,11 +564,14 @@ impl InspectorCompleter {
         let ends_with_space = prefix_line.ends_with(char::is_whitespace);
 
         match words.as_slice() {
-            [] => COMMANDS.iter().map(|command| command.to_string()).collect(),
+            [] => COMMANDS
+                .iter()
+                .map(|command| command.name.to_string())
+                .collect(),
             [first] if !ends_with_space => COMMANDS
                 .iter()
-                .filter(|command| command.starts_with(first.as_str()))
-                .map(|command| command.to_string())
+                .filter(|command| command.name.starts_with(first.as_str()))
+                .map(|command| command.name.to_string())
                 .collect(),
             [command] if ends_with_space && command == "tool" => self.state.tool_names.clone(),
             [command, partial] if command == "tool" && !ends_with_space => self
