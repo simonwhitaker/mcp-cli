@@ -105,6 +105,29 @@ impl Formatter {
         output
     }
 
+    pub fn prompts(&self, prompts: &[rmcp::model::Prompt]) -> String {
+        if self.json {
+            return self.json_value(prompts);
+        }
+        if prompts.is_empty() {
+            return "No prompts advertised by this server.\n".to_string();
+        }
+
+        let width = self.width(prompts, |prompt| prompt.name.len(), None, None);
+        let mut output = String::new();
+        for prompt in prompts {
+            let description = prompt.description.as_deref().unwrap_or("");
+            let _ = writeln!(
+                output,
+                "{:<width$}  {}",
+                self.accent(prompt.name.as_ref()),
+                description,
+                width = width + ansi_extra(&self.accent(prompt.name.as_ref()), prompt.name.len())
+            );
+        }
+        output
+    }
+
     fn width<T, F>(
         &self,
         items: &[T],

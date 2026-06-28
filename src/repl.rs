@@ -103,6 +103,12 @@ const COMMANDS: &[CommandSpec] = &[
         usage_hint: None,
         description: "Close the session and exit the REPL.",
     },
+    CommandSpec {
+        name: "prompts",
+        aliases: &[],
+        usage_hint: None,
+        description: "List available prompts.",
+    },
 ];
 
 const COMPLETION_MENU: &str = "completion_menu";
@@ -282,6 +288,9 @@ impl Repl {
                 self.rebuild_editor_completer();
                 println!("reloaded {} tools", session.tools().len());
             }
+            ReplCommand::Prompts => {
+                println!("{}", self.formatter.prompts(session.prompts()));
+            }
             ReplCommand::Quit => return Ok(Dispatch::Quit),
         }
         Ok(Dispatch::Continue)
@@ -376,6 +385,7 @@ pub enum ReplCommand {
     Resource {
         uri: String,
     },
+    Prompts,
     Reload,
     Quit,
 }
@@ -408,6 +418,7 @@ pub fn parse_command(line: &str) -> Result<ReplCommand> {
         "raw" => parse_raw_command(rest),
         "reload" => Ok(ReplCommand::Reload),
         "quit" | "exit" => Ok(ReplCommand::Quit),
+        "prompts" => Ok(ReplCommand::Prompts),
         other => bail!("unknown command: {other}"),
     }
 }

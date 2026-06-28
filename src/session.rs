@@ -4,7 +4,7 @@ use anyhow::{Context, Result, bail};
 use rmcp::{
     RoleClient, ServiceExt,
     model::{
-        CallToolRequestParams, CallToolResult, ClientRequest, CustomRequest,
+        CallToolRequestParams, CallToolResult, ClientRequest, CustomRequest, Prompt,
         ReadResourceRequestParams, Resource, ResourceContents, ServerInfo, ServerResult, Tool,
     },
     service::{RunningService, ServiceError},
@@ -21,6 +21,7 @@ pub struct McpSession {
     handler: InspectorClient,
     tools: Vec<Tool>,
     resources: Vec<Resource>,
+    prompts: Vec<Prompt>,
 }
 
 impl McpSession {
@@ -67,6 +68,7 @@ impl McpSession {
             handler,
             tools: Vec::new(),
             resources: Vec::new(),
+            prompts: Vec::new(),
         };
         session.refresh().await?;
         Ok(session)
@@ -85,6 +87,10 @@ impl McpSession {
 
     pub fn resources(&self) -> &[Resource] {
         &self.resources
+    }
+
+    pub fn prompts(&self) -> &[Prompt] {
+        &self.prompts
     }
 
     pub fn tool(&self, name: &str) -> Option<&Tool> {
@@ -114,7 +120,18 @@ impl McpSession {
         } else {
             Vec::new()
         };
-        self.resources.sort_by(|a, b| a.name.cmp(&b.name));
+        self.resources.sort_by(|a, b| a.uri.cmp(&b.uri));
+
+        self.prompts = if server_info.capabilities.prompts.is_some() {
+            self.running
+                .peer()
+                .list_all_prompts()
+                .await
+                .context("failed to list prompts")?
+        } else {
+            Vec::new()
+        };
+        self.prompts.sort_by(|a, b| a.name.cmp(&b.name));
 
         Ok(())
     }
