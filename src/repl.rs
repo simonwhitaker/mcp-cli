@@ -222,11 +222,7 @@ impl Repl {
                         Err(error) => eprintln!("{}", self.formatter.error(&error.to_string())),
                     }
                 }
-                Ok(Signal::CtrlD) => break,
-                Ok(Signal::CtrlC) => {
-                    println!("^C");
-                    continue;
-                }
+                Ok(Signal::CtrlC) | Ok(Signal::CtrlD) => break,
                 Ok(Signal::HostCommand(command) | Signal::ExternalBreak(command)) => {
                     if !command.trim().is_empty() {
                         match self.dispatch(command.trim(), session).await {
