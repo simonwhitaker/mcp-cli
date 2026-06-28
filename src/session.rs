@@ -92,20 +92,31 @@ impl McpSession {
     }
 
     pub async fn refresh(&mut self) -> Result<()> {
-        self.tools = self
+        let peer_info = self
             .running
-            .peer()
-            .list_all_tools()
-            .await
-            .context("failed to list tools")?;
+            .peer_info()
+            .context("failed to get server capabilities")?;
+
+        self.tools = if peer_info.capabilities.tools.is_some() {
+            self.running
+                .peer()
+                .list_all_tools()
+                .await
+                .context("failed to list tools")?
+        } else {
+            Vec::new()
+        };
         self.tools.sort_by(|a, b| a.name.cmp(&b.name));
 
-        self.resources = self
-            .running
-            .peer()
-            .list_all_resources()
-            .await
-            .context("failed to list resources")?;
+        self.resources = if peer_info.capabilities.resources.is_some() {
+            self.running
+                .peer()
+                .list_all_resources()
+                .await
+                .context("failed to list resources")?
+        } else {
+            Vec::new()
+        };
         self.resources.sort_by(|a, b| a.name.cmp(&b.name));
 
         Ok(())
