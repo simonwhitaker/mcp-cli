@@ -8,6 +8,8 @@ use rmcp::model::{
 use serde::Serialize;
 use serde_json::{Map, Value};
 
+use crate::repl_types::CommandSpec;
+
 #[derive(Debug, Clone, Copy)]
 pub struct Formatter {
     color: bool,
@@ -236,6 +238,18 @@ impl Formatter {
             );
         }
         output
+    }
+
+    pub fn command(&self, command: &CommandSpec) -> String {
+        let mut doc = String::new();
+        let mut entry = command.usage_hint.unwrap_or(command.name).to_string();
+        for alias in command.aliases {
+            entry.push_str(", ");
+            entry.push_str(alias);
+        }
+        doc.push_str(format!("  {:30} ", self.accent(&entry)).as_str());
+        doc.push_str(command.description);
+        doc
     }
 
     pub fn json_value<T: Serialize + ?Sized>(&self, value: &T) -> String {

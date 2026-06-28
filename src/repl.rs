@@ -17,29 +17,9 @@ use thiserror::Error;
 use crate::{
     client_handler::ClientNotification,
     format::Formatter,
+    repl_types::CommandSpec,
     session::{McpSession, object_from_value},
 };
-
-struct CommandSpec {
-    name: &'static str,
-    aliases: &'static [&'static str],
-    usage_hint: Option<&'static str>,
-    description: &'static str,
-}
-
-impl CommandSpec {
-    fn doc_string(&self) -> String {
-        let mut doc = String::new();
-        let mut entry = self.usage_hint.unwrap_or(self.name).to_string();
-        for alias in self.aliases {
-            entry.push_str(", ");
-            entry.push_str(alias);
-        }
-        doc.push_str(format!("{:30} ", entry).as_str());
-        doc.push_str(self.description);
-        doc
-    }
-}
 
 const COMMANDS: &[CommandSpec] = &[
     CommandSpec {
@@ -572,7 +552,7 @@ fn help_text(formatter: Formatter) -> String {
     }
     let mut doc_strings = COMMANDS
         .iter()
-        .map(|command| format!("  {}", command.doc_string()))
+        .map(|command| formatter.command(command))
         .collect::<Vec<_>>();
     doc_strings.sort();
     ["Commands:", doc_strings.join("\n").as_str(), ""].join("\n")
