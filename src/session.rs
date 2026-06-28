@@ -92,12 +92,9 @@ impl McpSession {
     }
 
     pub async fn refresh(&mut self) -> Result<()> {
-        let peer_info = self
-            .running
-            .peer_info()
-            .context("failed to get server capabilities")?;
+        let server_info = self.server_info()?;
 
-        self.tools = if peer_info.capabilities.tools.is_some() {
+        self.tools = if server_info.capabilities.tools.is_some() {
             self.running
                 .peer()
                 .list_all_tools()
@@ -108,7 +105,7 @@ impl McpSession {
         };
         self.tools.sort_by(|a, b| a.name.cmp(&b.name));
 
-        self.resources = if peer_info.capabilities.resources.is_some() {
+        self.resources = if server_info.capabilities.resources.is_some() {
             self.running
                 .peer()
                 .list_all_resources()
