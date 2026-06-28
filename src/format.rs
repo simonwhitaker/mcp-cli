@@ -187,6 +187,38 @@ impl Formatter {
         output
     }
 
+    pub fn resource(&self, resource: &ResourceContents) -> String {
+        match resource {
+            ResourceContents::TextResourceContents {
+                uri,
+                mime_type,
+                text,
+                ..
+            } => {
+                let mut output = format!(
+                    "{} {} {}\n",
+                    self.label("resource"),
+                    uri,
+                    self.dim(mime_type.as_deref().unwrap_or("text"))
+                );
+                output.push_str(&format_text_or_json(text, self));
+                output
+            }
+            ResourceContents::BlobResourceContents {
+                uri,
+                mime_type,
+                blob,
+                ..
+            } => format!(
+                "{} {} {} {} bytes base64\n",
+                self.label("resource"),
+                uri,
+                self.dim(mime_type.as_deref().unwrap_or("blob")),
+                blob.len()
+            ),
+        }
+    }
+
     pub fn json_value<T: Serialize + ?Sized>(&self, value: &T) -> String {
         serde_json::to_string_pretty(value)
             .unwrap_or_else(|error| format!("failed to serialize value: {error}"))
@@ -251,38 +283,6 @@ impl Formatter {
             ),
             RawContent::Resource(resource) => self.resource(&resource.resource),
             RawContent::ResourceLink(resource) => self.resource_link(resource),
-        }
-    }
-
-    pub fn resource(&self, resource: &ResourceContents) -> String {
-        match resource {
-            ResourceContents::TextResourceContents {
-                uri,
-                mime_type,
-                text,
-                ..
-            } => {
-                let mut output = format!(
-                    "{} {} {}\n",
-                    self.label("resource"),
-                    uri,
-                    self.dim(mime_type.as_deref().unwrap_or("text"))
-                );
-                output.push_str(&format_text_or_json(text, self));
-                output
-            }
-            ResourceContents::BlobResourceContents {
-                uri,
-                mime_type,
-                blob,
-                ..
-            } => format!(
-                "{} {} {} {} bytes base64\n",
-                self.label("resource"),
-                uri,
-                self.dim(mime_type.as_deref().unwrap_or("blob")),
-                blob.len()
-            ),
         }
     }
 
