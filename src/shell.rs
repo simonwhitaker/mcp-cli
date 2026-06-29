@@ -17,8 +17,8 @@ use thiserror::Error;
 use crate::{
     client_handler::ClientNotification,
     format::Formatter,
-    repl_types::CommandSpec,
     session::{McpSession, object_from_value},
+    shell_types::CommandSpec,
 };
 
 const COMMANDS: &[CommandSpec] = &[
@@ -80,7 +80,7 @@ const COMMANDS: &[CommandSpec] = &[
         name: "quit",
         aliases: &["exit"],
         usage_hint: None,
-        description: "Close the session and exit the REPL",
+        description: "Close the session and exit the shell",
     },
     CommandSpec {
         name: "prompts",
@@ -99,12 +99,12 @@ const COMMANDS: &[CommandSpec] = &[
 const COMPLETION_MENU: &str = "completion_menu";
 
 #[derive(Debug, Error)]
-pub enum ReplError {
+pub enum ShellError {
     #[error("{0}")]
     Command(String),
 }
 
-pub struct Repl {
+pub struct Shell {
     editor: Reedline,
     formatter: Formatter,
     prompt: DefaultPrompt,
@@ -169,7 +169,7 @@ impl CompletionState {
     }
 }
 
-impl Repl {
+impl Shell {
     pub fn new(
         server_name: &str,
         session: &McpSession,
@@ -242,51 +242,51 @@ impl Repl {
     async fn dispatch(&mut self, line: &str, session: &mut McpSession) -> Result<Dispatch> {
         let command = parse_command(line)?;
         match command {
-            ReplCommand::Help => {
+            ShellCommand::Help => {
                 println!("{}", help_text(self.formatter));
             }
-            ReplCommand::Info => {
+            ShellCommand::Info => {
                 let info = session.server_info()?;
                 println!("{}", self.formatter.server_info(info.as_ref()));
             }
-            ReplCommand::Tools => {
+            ShellCommand::Tools => {
                 println!("{}", self.formatter.tools(session.tools()));
             }
-            ReplCommand::Resources => {
+            ShellCommand::Resources => {
                 println!("{}", self.formatter.resources(session.resources()));
             }
-            ReplCommand::Schema { tool } => {
+            ShellCommand::Schema { tool } => {
                 let tool = session
                     .tool(&tool)
                     .with_context(|| format!("unknown tool: {tool}"))?;
                 println!("{}", self.formatter.schema(tool));
             }
-            ReplCommand::Resource { uri } => {
+            ShellCommand::Resource { uri } => {
                 let result = session.get_resource(&uri).await?;
                 println!("{}", self.formatter.resource(&result));
             }
-            ReplCommand::Tool { name, arguments } => {
+            ShellCommand::Tool { name, arguments } => {
                 let result = session.call_tool(&name, arguments).await?;
                 println!("{}", self.formatter.tool_result(&result));
             }
-            ReplCommand::Raw { method, params } => {
+            ShellCommand::Raw { method, params } => {
                 let result = session.raw_request(method, params).await?;
                 println!("{}", self.formatter.json_value(&result));
             }
-            ReplCommand::Reload => {
+            ShellCommand::Reload => {
                 session.refresh().await?;
                 self.completion_state = CompletionState::from_session(session);
                 self.rebuild_editor_completer();
                 println!("reloaded {} tools", session.tools().len());
             }
-            ReplCommand::Prompts => {
+            ShellCommand::Prompts => {
                 println!("{}", self.formatter.prompts(session.prompts()));
             }
-            ReplCommand::Prompt { name } => {
+            ShellCommand::Prompt { name } => {
                 let result = session.get_prompt(&name).await?;
                 println!("{}", self.formatter.prompt(&result));
             }
-            ReplCommand::Quit => return Ok(Dispatch::Quit),
+            ShellCommand::Quit => return Ok(Dispatch::Quit),
         }
         Ok(Dispatch::Continue)
     }
@@ -361,7 +361,7 @@ fn build_editor(completion_state: CompletionState) -> Reedline {
 }
 
 #[derive(Debug, Clone, PartialEq)]
-pub enum ReplCommand {
+pub enum ShellCommand {
     Help,
     Info,
     Tools,
@@ -394,49 +394,49 @@ enum Dispatch {
     Quit,
 }
 
-pub fn parse_command(line: &str) -> Result<ReplCommand> {
+pub fn parse_command(line: &str) -> Result<ShellCommand> {
     let words = shlex::split(line).context("failed to parse command line")?;
     let Some((command, rest)) = words.split_first() else {
         bail!("empty command");
     };
     match command.as_str() {
-        "help" | "?" => Ok(ReplCommand::Help),
-        "info" => Ok(ReplCommand::Info),
-        "tools" => Ok(ReplCommand::Tools),
-        "resources" => Ok(ReplCommand::Resources),
+        "help" | "?" => Ok(ShellCommand::Help),
+        "info" => Ok(ShellCommand::Info),
+        "tools" => Ok(ShellCommand::Tools),
+        "resources" => Ok(ShellCommand::Resources),
         "resource" => {
             let uri = expect_one(rest, "resource RESOURCE")?;
-            Ok(ReplCommand::Resource { uri })
+            Ok(ShellCommand::Resource { uri })
         }
         "schema" => {
             let tool = expect_one(rest, "schema TOOL")?;
-            Ok(ReplCommand::Schema { tool })
+            Ok(ShellCommand::Schema { tool })
         }
         "tool" => parse_tool_command(rest),
         "raw" => parse_raw_command(rest),
-        "reload" => Ok(ReplCommand::Reload),
-        "quit" | "exit" => Ok(ReplCommand::Quit),
-        "prompts" => Ok(ReplCommand::Prompts),
+        "reload" => Ok(ShellCommand::Reload),
+        "quit" | "exit" => Ok(ShellCommand::Quit),
+        "prompts" => Ok(ShellCommand::Prompts),
         "prompt" => {
             let name = expect_one(rest, "prompt NAME")?;
-            Ok(ReplCommand::Prompt { name })
+            Ok(ShellCommand::Prompt { name })
         }
         other => bail!("unknown command: {other}"),
     }
 }
 
-fn parse_tool_command(words: &[String]) -> Result<ReplCommand> {
+fn parse_tool_command(words: &[String]) -> Result<ShellCommand> {
     let Some((name, rest)) = words.split_first() else {
         bail!("usage: tool TOOL [key=value ... | --json '{{...}}' | @file.json]");
     };
     let arguments = parse_arguments(rest)?;
-    Ok(ReplCommand::Tool {
+    Ok(ShellCommand::Tool {
         name: name.clone(),
         arguments,
     })
 }
 
-fn parse_raw_command(words: &[String]) -> Result<ReplCommand> {
+fn parse_raw_command(words: &[String]) -> Result<ShellCommand> {
     let Some((method, rest)) = words.split_first() else {
         bail!("usage: raw METHOD [JSON]");
     };
@@ -445,7 +445,7 @@ fn parse_raw_command(words: &[String]) -> Result<ReplCommand> {
     } else {
         Some(serde_json::from_str(&rest.join(" ")).context("raw params must be valid JSON")?)
     };
-    Ok(ReplCommand::Raw {
+    Ok(ShellCommand::Raw {
         method: method.clone(),
         params,
     })
@@ -687,7 +687,7 @@ fn path_exists(path: &Path) -> bool {
 mod tests {
     use serde_json::json;
 
-    use super::{ReplCommand, parse_arguments, parse_command};
+    use super::{ShellCommand, parse_arguments, parse_command};
 
     #[test]
     fn parses_key_value_arguments() {
@@ -713,7 +713,7 @@ mod tests {
         let command = parse_command(r#"tool lookup --json '{"q":"rust"}'"#).unwrap();
         assert_eq!(
             command,
-            ReplCommand::Tool {
+            ShellCommand::Tool {
                 name: "lookup".to_string(),
                 arguments: json!({"q": "rust"})
             }
@@ -725,7 +725,7 @@ mod tests {
         let command = parse_command(r#"raw tools/list '{"cursor":null}'"#).unwrap();
         assert_eq!(
             command,
-            ReplCommand::Raw {
+            ShellCommand::Raw {
                 method: "tools/list".to_string(),
                 params: Some(json!({"cursor": null}))
             }

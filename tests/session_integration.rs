@@ -1,4 +1,4 @@
-use mcp_cli::{client_handler::InspectorClient, repl::parse_command, session::McpSession};
+use mcp_cli::{client_handler::InspectorClient, session::McpSession, shell::parse_command};
 use rmcp::{
     ErrorData as McpError, RoleServer, ServerHandler, ServiceExt,
     model::{
@@ -137,7 +137,7 @@ fn malformed_json_is_a_friendly_parse_error() {
 }
 
 #[test]
-fn unknown_repl_command_is_reported() {
+fn unknown_shell_command_is_reported() {
     let error = parse_command("wat").unwrap_err();
     assert!(error.to_string().contains("unknown command"));
 }

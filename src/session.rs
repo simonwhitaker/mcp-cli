@@ -213,7 +213,7 @@ pub fn object_from_value(value: Value) -> Result<Map<String, Value>> {
     }
 }
 
-impl From<ServiceError> for crate::repl::ReplError {
+impl From<ServiceError> for crate::shell::ShellError {
     fn from(value: ServiceError) -> Self {
         Self::Command(value.to_string())
     }

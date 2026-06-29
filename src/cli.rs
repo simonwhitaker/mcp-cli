@@ -9,7 +9,7 @@ use crate::transport::TransportConfig;
 #[command(
     name = "mcp",
     version,
-    about = "Inspect and debug MCP servers from a terminal REPL"
+    about = "Inspect and debug MCP servers from an interactive shell"
 )]
 pub struct Cli {
     #[arg(long, help = "Print protocol and diagnostic detail")]
@@ -18,7 +18,7 @@ pub struct Cli {
     #[arg(long, help = "Emit command output as JSON where possible")]
     pub json: bool,
 
-    #[arg(long, value_name = "PATH", help = "Path to the REPL history file")]
+    #[arg(long, value_name = "PATH", help = "Path to the shell history file")]
     pub history: Option<PathBuf>,
 
     #[arg(long, help = "Disable ANSI colors")]

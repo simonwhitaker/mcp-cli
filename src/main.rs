@@ -1,6 +1,6 @@
 use anyhow::Result;
 use clap::Parser;
-use mcp_cli::{cli::Cli, format::Formatter, repl::Repl, session::McpSession};
+use mcp_cli::{cli::Cli, format::Formatter, session::McpSession, shell::Shell};
 use tracing_subscriber::{EnvFilter, fmt};
 
 #[tokio::main]
@@ -20,8 +20,8 @@ async fn main() -> Result<()> {
         server_info.server_info.name.to_string()
     };
 
-    let mut repl = Repl::new(&server_name, &session, cli.history, formatter)?;
-    let result = repl.run(&mut session).await;
+    let mut shell = Shell::new(&server_name, &session, cli.history, formatter)?;
+    let result = shell.run(&mut session).await;
     session.close().await?;
     result
 }

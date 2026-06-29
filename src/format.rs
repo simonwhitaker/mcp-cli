@@ -8,7 +8,7 @@ use rmcp::model::{
 use serde::Serialize;
 use serde_json::{Map, Value};
 
-use crate::repl_types::CommandSpec;
+use crate::shell_types::CommandSpec;
 
 #[derive(Debug, Clone, Copy)]
 pub struct Formatter {

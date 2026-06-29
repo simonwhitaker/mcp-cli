@@ -1,8 +1,8 @@
 # MCP Inspector CLI
 
 `mcp` is an interactive terminal inspector for Model Context Protocol servers.
-It connects to an MCP server, lists the advertised tools, and gives you a REPL
-for calling tools and inspecting schemas.
+It connects to an MCP server, lists the advertised tools, and gives you a shell
+for calling tools and inspecting schemas, resources and prompts.
 
 ## Build
 
@@ -95,7 +95,7 @@ target as a stdio command and arguments.
 ```text
 --debug                 Print protocol and diagnostic detail
 --json                  Emit command output as JSON where possible
---history <PATH>        Path to the REPL history file
+--history <PATH>        Path to the shell history file
 --no-color              Disable ANSI colors
 --header <NAME=VALUE>   Send an HTTP header with every request
 --bearer-token-env VAR  Read bearer token from an environment variable
@@ -107,7 +107,7 @@ target as a stdio command and arguments.
 `--header` and bearer token options are only valid with an HTTP(S) target. Use
 only one bearer token source at a time.
 
-## REPL Commands
+## Shell Commands
 
 Once connected, the prompt is `mcp:<server-name>`.
 
@@ -164,7 +164,7 @@ The file must contain a JSON object.
 
 Tab completion is enabled for:
 
-- REPL commands
+- Shell commands
 - tool names
 - tool argument names derived from each tool input schema
 
