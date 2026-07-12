@@ -2,8 +2,8 @@ use std::fmt::Write;
 
 use nu_ansi_term::{Color, Style};
 use rmcp::model::{
-    CallToolResult, Content, Prompt, RawContent, RawResource, Resource, ResourceContents,
-    ServerInfo, Tool,
+    CallToolResult, Content, GetPromptResult, Prompt, PromptArgument, PromptMessageContent,
+    PromptMessageRole, RawContent, RawResource, Resource, ResourceContents, ServerInfo, Tool,
 };
 use serde::Serialize;
 use serde_json::{Map, Value};
@@ -108,7 +108,7 @@ impl Formatter {
         output
     }
 
-    pub fn prompts(&self, prompts: &[rmcp::model::Prompt]) -> String {
+    pub fn prompts(&self, prompts: &[Prompt]) -> String {
         if self.json {
             return self.json_value(prompts);
         }
@@ -120,11 +120,13 @@ impl Formatter {
         let mut output = String::new();
         for prompt in prompts {
             let description = prompt.description.as_deref().unwrap_or("");
+            let arguments = arguments_summary(prompt.arguments.as_deref().unwrap_or_default());
             let _ = writeln!(
                 output,
-                "{:<width$}  {}",
+                "{:<width$}  {} {}",
                 self.accent(prompt.name.as_ref()),
                 description,
+                self.dim(&arguments),
                 width = width + ansi_extra(&self.accent(prompt.name.as_ref()), prompt.name.len())
             );
         }
@@ -222,21 +224,35 @@ impl Formatter {
         }
     }
 
-    pub fn prompt(&self, prompt: &Prompt) -> String {
+    pub fn prompt_result(&self, name: &str, result: &GetPromptResult) -> String {
+        if self.json {
+            return self.json_value(result);
+        }
+
         let mut output = format!(
             "{} {} {}\n",
             self.label("prompt"),
-            prompt.name,
-            self.dim(prompt.description.as_deref().unwrap_or("<no description>"))
+            name,
+            self.dim(result.description.as_deref().unwrap_or(""))
         );
-        if let Some(args) = &prompt.arguments {
-            let _ = writeln!(
-                output,
-                "{} {}",
-                self.label("arguments"),
-                self.json_value(args)
-            );
+
+        if result.messages.is_empty() {
+            output.push_str("(no messages)\n");
+            return output;
         }
+
+        for message in &result.messages {
+            let role = match message.role {
+                PromptMessageRole::User => "user",
+                PromptMessageRole::Assistant => "assistant",
+            };
+            let _ = writeln!(output, "{}", self.label(&format!("[{role}]")));
+            output.push_str(&self.prompt_content(&message.content));
+            if !output.ends_with('\n') {
+                output.push('\n');
+            }
+        }
+
         output
     }
 
@@ -319,6 +335,19 @@ impl Formatter {
         }
     }
 
+    fn prompt_content(&self, content: &PromptMessageContent) -> String {
+        match content {
+            PromptMessageContent::Text { text } => format_text_or_json(text, self),
+            PromptMessageContent::Image { image } => format!(
+                "{} {} bytes base64\n",
+                self.label("image"),
+                image.data.len()
+            ),
+            PromptMessageContent::Resource { resource } => self.resource(&resource.resource),
+            PromptMessageContent::ResourceLink { link } => self.resource_link(link),
+        }
+    }
+
     fn resource_link(&self, resource: &RawResource) -> String {
         format!(
             "{} {} {}\n",
@@ -357,6 +386,24 @@ pub fn schema_summary(value: &Value) -> String {
         };
         parts.push(format!("{name}{required_marker}:{ty}"));
     }
+    format!("({})", parts.join(", "))
+}
+
+pub fn arguments_summary(arguments: &[PromptArgument]) -> String {
+    if arguments.is_empty() {
+        return String::new();
+    }
+    let parts = arguments
+        .iter()
+        .map(|argument| {
+            let required_marker = if argument.required == Some(true) {
+                ""
+            } else {
+                "?"
+            };
+            format!("{}{required_marker}", argument.name)
+        })
+        .collect::<Vec<_>>();
     format!("({})", parts.join(", "))
 }
 

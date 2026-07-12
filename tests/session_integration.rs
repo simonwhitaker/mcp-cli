@@ -2,8 +2,10 @@ use mcp_cli::{client_handler::InspectorClient, session::McpSession, shell::parse
 use rmcp::{
     ErrorData as McpError, RoleServer, ServerHandler, ServiceExt,
     model::{
-        CallToolRequestParams, CallToolResult, Content, ListToolsResult, PaginatedRequestParams,
-        ServerCapabilities, ServerInfo, Tool,
+        CallToolRequestParams, CallToolResult, Content, GetPromptRequestParams, GetPromptResult,
+        ListPromptsResult, ListToolsResult, PaginatedRequestParams, Prompt, PromptArgument,
+        PromptMessage, PromptMessageContent, PromptMessageRole, ServerCapabilities, ServerInfo,
+        Tool,
     },
     service::{MaybeSendFuture, RequestContext},
 };
@@ -20,8 +22,71 @@ impl FakeServer {
 
 impl ServerHandler for FakeServer {
     fn get_info(&self) -> ServerInfo {
-        ServerInfo::new(ServerCapabilities::builder().enable_tools().build())
-            .with_instructions("fake test server")
+        ServerInfo::new(
+            ServerCapabilities::builder()
+                .enable_tools()
+                .enable_prompts()
+                .build(),
+        )
+        .with_instructions("fake test server")
+    }
+
+    fn list_prompts(
+        &self,
+        _request: Option<PaginatedRequestParams>,
+        _context: RequestContext<RoleServer>,
+    ) -> impl std::future::Future<Output = Result<ListPromptsResult, McpError>> + MaybeSendFuture + '_
+    {
+        let mut topic = PromptArgument::new("topic");
+        topic.required = Some(true);
+
+        std::future::ready(Ok(ListPromptsResult {
+            prompts: vec![
+                Prompt::new(
+                    "greet",
+                    Some("Greet someone about a topic"),
+                    Some(vec![topic, PromptArgument::new("style")]),
+                ),
+                Prompt::new("empty", Some("Takes no arguments"), None),
+            ],
+            ..Default::default()
+        }))
+    }
+
+    async fn get_prompt(
+        &self,
+        request: GetPromptRequestParams,
+        _context: RequestContext<RoleServer>,
+    ) -> Result<GetPromptResult, McpError> {
+        let args = request.arguments.unwrap_or_default();
+        match request.name.as_ref() {
+            "greet" => {
+                let topic = args
+                    .get("topic")
+                    .and_then(|value| value.as_str())
+                    .ok_or_else(|| {
+                        McpError::invalid_params("missing required argument: topic", None)
+                    })?;
+                let style = args
+                    .get("style")
+                    .and_then(|value| value.as_str())
+                    .unwrap_or("plain");
+                let mut result = GetPromptResult::new(vec![PromptMessage::new(
+                    PromptMessageRole::User,
+                    PromptMessageContent::text(format!("Say hello about {topic} in {style}")),
+                )]);
+                result.description = Some("a greeting".to_string());
+                Ok(result)
+            }
+            "empty" => Ok(GetPromptResult::new(vec![PromptMessage::new(
+                PromptMessageRole::User,
+                PromptMessageContent::text("no arguments here"),
+            )])),
+            other => Err(McpError::invalid_request(
+                format!("unknown prompt: {other}"),
+                Some(json!({"prompt": other})),
+            )),
+        }
     }
 
     fn list_tools(
@@ -125,6 +190,45 @@ async fn session_initializes_lists_and_calls_tools() -> anyhow::Result<()> {
     assert!(missing.is_err());
 
     session.refresh().await?;
+    session.close().await?;
+    let _ = server_task.await??;
+    Ok(())
+}
+
+#[tokio::test]
+async fn session_lists_and_renders_prompts() -> anyhow::Result<()> {
+    let (server_transport, client_transport) = tokio::io::duplex(8192);
+    let server_task = tokio::spawn(async move {
+        let server = FakeServer::new().serve(server_transport).await?;
+        Ok::<_, anyhow::Error>(server.waiting().await?)
+    });
+
+    let handler = InspectorClient::new(true);
+    let running = handler.clone().serve(client_transport).await?;
+    let mut session = McpSession::from_running(running, handler).await?;
+
+    assert_eq!(session.prompts().len(), 2);
+
+    let greet = session
+        .get_prompt("greet", json!({"topic": "rust", "style": "haiku"}))
+        .await?;
+    assert_eq!(greet.description.as_deref(), Some("a greeting"));
+    assert!(
+        serde_json::to_value(&greet)?
+            .to_string()
+            .contains("Say hello about rust in haiku")
+    );
+
+    let empty = session.get_prompt("empty", json!({})).await?;
+    assert_eq!(empty.messages.len(), 1);
+
+    // The server, not the client, decides that a required argument is missing.
+    let missing_argument = session.get_prompt("greet", json!({})).await;
+    assert!(missing_argument.is_err());
+
+    let missing_prompt = session.get_prompt("nope", json!({})).await;
+    assert!(missing_prompt.is_err());
+
     session.close().await?;
     let _ = server_task.await??;
     Ok(())

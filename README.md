@@ -112,19 +112,23 @@ only one bearer token source at a time.
 Once connected, the prompt is `mcp:<server-name>`.
 
 ```text
-help                         Show command help
-info                         Show server metadata and capabilities
-tools                        List available tools
-schema TOOL                  Pretty-print a tool input schema
+help                          Show command help
+info                          Show server metadata and capabilities
+tools                         List available tools
+schema TOOL                   Pretty-print a tool input schema
 tool TOOL key=value ...       Call a tool
 tool TOOL --json '{...}'      Call a tool with raw JSON arguments
 tool TOOL @args.json          Call a tool with JSON arguments from a file
+resources                     List available resources
+resource URI                  Read a resource
+prompts                       List available prompts
+prompt NAME key=value ...     Render a prompt
 raw METHOD [JSON]             Send a raw MCP request
-reload                       Refresh tool metadata and completions
+reload                        Refresh tool metadata and completions
 quit | exit                   Close the session
 ```
 
-Ctrl-D also exits. Ctrl-C cancels the current input line.
+Ctrl-C and Ctrl-D also exit.
 
 ## Calling Tools
 
@@ -159,6 +163,32 @@ tool create @args.json
 ```
 
 The file must contain a JSON object.
+
+## Rendering Prompts
+
+`prompts` lists the prompts a server advertises, with their arguments. A `?`
+marks an optional argument:
+
+```text
+args-prompt   A prompt with two arguments (city, state?)
+```
+
+`prompt NAME` calls `prompts/get` and prints the messages the server returns:
+
+```text
+prompt args-prompt city=Bristol
+```
+
+MCP prompt arguments are strings, so values are passed through as written
+rather than being converted to JSON scalars the way tool arguments are. To send
+anything else, use `--json` or `@file`:
+
+```text
+prompt args-prompt --json '{"city":"Bristol"}'
+prompt args-prompt @args.json
+```
+
+Argument names complete on tab, and the server validates required arguments.
 
 ## Completion and History
 

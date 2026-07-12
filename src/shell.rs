@@ -91,8 +91,8 @@ const COMMANDS: &[CommandSpec] = &[
     CommandSpec {
         name: "prompt",
         aliases: &[],
-        usage_hint: Some("prompt NAME"),
-        description: "Show details of a prompt",
+        usage_hint: Some("prompt NAME [key=value ... | --json '{...}' | @file.json]"),
+        description: "Render a prompt with arguments specified as key=value pairs, raw JSON, or a JSON file",
     },
 ];
 
@@ -117,6 +117,7 @@ pub struct CompletionState {
     tool_args: Vec<(String, Vec<String>)>,
     resource_uris: Vec<String>,
     prompt_names: Vec<String>,
+    prompt_args: Vec<(String, Vec<String>)>,
 }
 
 impl CompletionState {
@@ -152,21 +153,44 @@ impl CompletionState {
             .collect::<Vec<_>>();
         prompt_names.sort();
 
+        let prompt_args = session
+            .prompts()
+            .iter()
+            .map(|prompt| {
+                let args = prompt
+                    .arguments
+                    .as_deref()
+                    .unwrap_or_default()
+                    .iter()
+                    .map(|argument| argument.name.clone())
+                    .collect();
+                (prompt.name.to_string(), args)
+            })
+            .collect();
+
         Self {
             tool_names,
             tool_args,
             resource_uris,
             prompt_names,
+            prompt_args,
         }
     }
 
     fn arg_names(&self, tool_name: &str) -> Vec<String> {
-        self.tool_args
-            .iter()
-            .find(|(name, _)| name == tool_name)
-            .map(|(_, args)| args.clone())
-            .unwrap_or_default()
+        lookup_args(&self.tool_args, tool_name)
     }
+
+    fn prompt_arg_names(&self, prompt_name: &str) -> Vec<String> {
+        lookup_args(&self.prompt_args, prompt_name)
+    }
+}
+
+fn lookup_args(args: &[(String, Vec<String>)], name: &str) -> Vec<String> {
+    args.iter()
+        .find(|(candidate, _)| candidate == name)
+        .map(|(_, args)| args.clone())
+        .unwrap_or_default()
 }
 
 impl Shell {
@@ -219,7 +243,7 @@ impl Shell {
                     match self.dispatch(line, session).await {
                         Ok(Dispatch::Continue) => {}
                         Ok(Dispatch::Quit) => break,
-                        Err(error) => eprintln!("{}", self.formatter.error(&error.to_string())),
+                        Err(error) => self.print_error(&error),
                     }
                 }
                 Ok(Signal::CtrlC) | Ok(Signal::CtrlD) => break,
@@ -228,7 +252,7 @@ impl Shell {
                         match self.dispatch(command.trim(), session).await {
                             Ok(Dispatch::Quit) => break,
                             Ok(Dispatch::Continue) => {}
-                            Err(error) => eprintln!("{}", self.formatter.error(&error.to_string())),
+                            Err(error) => self.print_error(&error),
                         }
                     }
                 }
@@ -282,13 +306,19 @@ impl Shell {
             ShellCommand::Prompts => {
                 println!("{}", self.formatter.prompts(session.prompts()));
             }
-            ShellCommand::Prompt { name } => {
-                let result = session.get_prompt(&name).await?;
-                println!("{}", self.formatter.prompt(&result));
+            ShellCommand::Prompt { name, arguments } => {
+                let result = session.get_prompt(&name, arguments).await?;
+                println!("{}", self.formatter.prompt_result(&name, &result));
             }
             ShellCommand::Quit => return Ok(Dispatch::Quit),
         }
         Ok(Dispatch::Continue)
+    }
+
+    /// `{:#}` includes the whole cause chain, so a server's own explanation is
+    /// not lost behind the context we added on the way out.
+    fn print_error(&self, error: &anyhow::Error) {
+        eprintln!("{}", self.formatter.error(&format!("{error:#}")));
     }
 
     async fn print_notifications(&self, session: &McpSession) {
@@ -383,6 +413,7 @@ pub enum ShellCommand {
     Prompts,
     Prompt {
         name: String,
+        arguments: Value,
     },
     Reload,
     Quit,
@@ -417,10 +448,7 @@ pub fn parse_command(line: &str) -> Result<ShellCommand> {
         "reload" => Ok(ShellCommand::Reload),
         "quit" | "exit" => Ok(ShellCommand::Quit),
         "prompts" => Ok(ShellCommand::Prompts),
-        "prompt" => {
-            let name = expect_one(rest, "prompt NAME")?;
-            Ok(ShellCommand::Prompt { name })
-        }
+        "prompt" => parse_prompt_command(rest),
         other => bail!("unknown command: {other}"),
     }
 }
@@ -431,6 +459,17 @@ fn parse_tool_command(words: &[String]) -> Result<ShellCommand> {
     };
     let arguments = parse_arguments(rest)?;
     Ok(ShellCommand::Tool {
+        name: name.clone(),
+        arguments,
+    })
+}
+
+fn parse_prompt_command(words: &[String]) -> Result<ShellCommand> {
+    let Some((name, rest)) = words.split_first() else {
+        bail!("usage: prompt NAME [key=value ... | --json '{{...}}' | @file.json]");
+    };
+    let arguments = parse_prompt_arguments(rest)?;
+    Ok(ShellCommand::Prompt {
         name: name.clone(),
         arguments,
     })
@@ -456,39 +495,72 @@ pub fn parse_arguments(words: &[String]) -> Result<Value> {
         return Ok(Value::Object(Map::new()));
     }
 
+    if let Some(arguments) = parse_json_arguments(words, "tool TOOL --json '{...}'")? {
+        return Ok(arguments);
+    }
+
+    let mut root = Map::new();
+    for word in words {
+        let (key, raw_value) = split_key_value(word)?;
+        insert_dotted(&mut root, key, parse_scalar(raw_value))?;
+    }
+    Ok(Value::Object(root))
+}
+
+/// MCP prompt arguments are a flat map of strings, so values are not coerced to
+/// JSON scalars the way tool arguments are. Use `--json` or `@file` to send
+/// anything else.
+pub fn parse_prompt_arguments(words: &[String]) -> Result<Value> {
+    if words.is_empty() {
+        return Ok(Value::Object(Map::new()));
+    }
+
+    if let Some(arguments) = parse_json_arguments(words, "prompt NAME --json '{...}'")? {
+        return Ok(arguments);
+    }
+
+    let mut root = Map::new();
+    for word in words {
+        let (key, raw_value) = split_key_value(word)?;
+        root.insert(key.to_string(), Value::String(raw_value.to_string()));
+    }
+    Ok(Value::Object(root))
+}
+
+fn parse_json_arguments(words: &[String], usage: &str) -> Result<Option<Value>> {
     if words[0] == "--json" {
-        let json_text = words.get(1).context("usage: tool TOOL --json '{...}'")?;
+        let json_text = words.get(1).with_context(|| format!("usage: {usage}"))?;
         if words.len() > 2 {
             bail!("--json accepts exactly one JSON object argument");
         }
-        return Ok(Value::Object(object_from_value(serde_json::from_str(
-            json_text,
-        )?)?));
+        return Ok(Some(Value::Object(object_from_value(
+            serde_json::from_str(json_text)?,
+        )?)));
     }
 
     if words.len() == 1 && words[0].starts_with('@') {
         let path = &words[0][1..];
         let text = fs::read_to_string(path)
             .with_context(|| format!("failed to read JSON argument file: {path}"))?;
-        return Ok(Value::Object(object_from_value(serde_json::from_str(
-            &text,
-        )?)?));
+        return Ok(Some(Value::Object(object_from_value(
+            serde_json::from_str(&text)?,
+        )?)));
     }
 
-    let mut root = Map::new();
-    for word in words {
-        if word.starts_with('@') {
-            bail!("@file must be the only tool argument");
-        }
-        let Some((key, raw_value)) = word.split_once('=') else {
-            bail!("expected key=value argument, got {word}");
-        };
-        if key.is_empty() {
-            bail!("argument key cannot be empty");
-        }
-        insert_dotted(&mut root, key, parse_scalar(raw_value))?;
+    Ok(None)
+}
+
+fn split_key_value(word: &str) -> Result<(&str, &str)> {
+    if word.starts_with('@') {
+        bail!("@file must be the only argument");
     }
-    Ok(Value::Object(root))
+    let Some((key, raw_value)) = word.split_once('=') else {
+        bail!("expected key=value argument, got {word}");
+    };
+    if key.is_empty() {
+        bail!("argument key cannot be empty");
+    }
+    Ok((key, raw_value))
 }
 
 fn parse_scalar(raw: &str) -> Value {
@@ -625,6 +697,19 @@ impl InspectorCompleter {
                 .filter(|name| name.starts_with(partial.as_str()))
                 .cloned()
                 .collect(),
+            [command, prompt, partial] if command == "prompt" && !ends_with_space => self
+                .state
+                .prompt_arg_names(prompt)
+                .into_iter()
+                .map(|arg| format!("{arg}="))
+                .filter(|arg| arg.starts_with(partial.as_str()))
+                .collect(),
+            [command, prompt, ..] if command == "prompt" => self
+                .state
+                .prompt_arg_names(prompt)
+                .into_iter()
+                .map(|arg| format!("{arg}="))
+                .collect(),
             [command] if ends_with_space && command == "schema" => self.state.tool_names.clone(),
             [command, partial] if command == "schema" && !ends_with_space => self
                 .state
@@ -716,6 +801,42 @@ mod tests {
             ShellCommand::Tool {
                 name: "lookup".to_string(),
                 arguments: json!({"q": "rust"})
+            }
+        );
+    }
+
+    #[test]
+    fn parses_prompt_arguments_as_strings() {
+        let command = parse_command("prompt greet topic=rust limit=3").unwrap();
+        assert_eq!(
+            command,
+            ShellCommand::Prompt {
+                name: "greet".to_string(),
+                arguments: json!({"topic": "rust", "limit": "3"})
+            }
+        );
+    }
+
+    #[test]
+    fn parses_prompt_command_without_arguments() {
+        let command = parse_command("prompt greet").unwrap();
+        assert_eq!(
+            command,
+            ShellCommand::Prompt {
+                name: "greet".to_string(),
+                arguments: json!({})
+            }
+        );
+    }
+
+    #[test]
+    fn parses_prompt_command_with_json_arguments() {
+        let command = parse_command(r#"prompt greet --json '{"topic":"rust"}'"#).unwrap();
+        assert_eq!(
+            command,
+            ShellCommand::Prompt {
+                name: "greet".to_string(),
+                arguments: json!({"topic": "rust"})
             }
         );
     }

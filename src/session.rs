@@ -4,8 +4,9 @@ use anyhow::{Context, Result, bail};
 use rmcp::{
     RoleClient, ServiceExt,
     model::{
-        CallToolRequestParams, CallToolResult, ClientRequest, CustomRequest, Prompt,
-        ReadResourceRequestParams, Resource, ResourceContents, ServerInfo, ServerResult, Tool,
+        CallToolRequestParams, CallToolResult, ClientRequest, CustomRequest,
+        GetPromptRequestParams, GetPromptResult, Prompt, ReadResourceRequestParams, Resource,
+        ResourceContents, ServerInfo, ServerResult, Tool,
     },
     service::{RunningService, ServiceError},
 };
@@ -169,12 +170,17 @@ impl McpSession {
             .clone())
     }
 
-    pub async fn get_prompt(&self, name: &str) -> Result<Prompt> {
-        self.prompts
-            .iter()
-            .find(|prompt| prompt.name == name)
-            .cloned()
-            .with_context(|| format!("prompt not found: {name}"))
+    /// Arguments are always sent, even when empty: servers that validate the
+    /// whole argument object report a missing required argument far more
+    /// clearly than they report a missing object.
+    pub async fn get_prompt(&self, name: &str, arguments: Value) -> Result<GetPromptResult> {
+        let arguments = object_from_value(arguments).context("prompt arguments")?;
+
+        self.running
+            .peer()
+            .get_prompt(GetPromptRequestParams::new(name.to_string()).with_arguments(arguments))
+            .await
+            .with_context(|| format!("failed to get prompt: {name}"))
     }
 
     pub async fn raw_request(&self, method: String, params: Option<Value>) -> Result<Value> {
