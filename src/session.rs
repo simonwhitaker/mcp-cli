@@ -5,8 +5,8 @@ use rmcp::{
     RoleClient, ServiceExt,
     model::{
         CallToolRequestParams, CallToolResult, ClientRequest, CustomRequest,
-        GetPromptRequestParams, GetPromptResult, Prompt, ReadResourceRequestParams, Resource,
-        ResourceContents, ServerInfo, ServerResult, Tool,
+        GetPromptRequestParams, GetPromptResult, Prompt, ReadResourceRequestParams,
+        ReadResourceResult, Resource, ServerInfo, ServerResult, Tool,
     },
     service::{RunningService, ServiceError},
 };
@@ -156,18 +156,12 @@ impl McpSession {
             .with_context(|| format!("tool call failed: {name}"))
     }
 
-    pub async fn get_resource(&self, uri: &str) -> Result<ResourceContents> {
-        let result = self
-            .running
+    pub async fn get_resource(&self, uri: &str) -> Result<ReadResourceResult> {
+        self.running
             .peer()
             .read_resource(ReadResourceRequestParams::new(uri.to_string()))
             .await
-            .context(format!("failed to load resource: {uri}"))?;
-        Ok(result
-            .contents
-            .first()
-            .context(format!("resource {uri} has no contents"))?
-            .clone())
+            .with_context(|| format!("failed to load resource: {uri}"))
     }
 
     /// Arguments are always sent, even when empty: servers that validate the

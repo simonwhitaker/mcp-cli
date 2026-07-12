@@ -3,7 +3,8 @@ use std::fmt::Write;
 use nu_ansi_term::{Color, Style};
 use rmcp::model::{
     CallToolResult, Content, GetPromptResult, Prompt, PromptArgument, PromptMessageContent,
-    PromptMessageRole, RawContent, RawResource, Resource, ResourceContents, ServerInfo, Tool,
+    PromptMessageRole, RawContent, RawResource, ReadResourceResult, Resource, ResourceContents,
+    ServerInfo, Tool,
 };
 use serde::Serialize;
 use serde_json::{Map, Value};
@@ -189,6 +190,28 @@ impl Formatter {
             }
         }
 
+        output
+    }
+
+    pub fn read_resource(&self, result: &ReadResourceResult) -> String {
+        if self.json {
+            return self.json_value(result);
+        }
+
+        if result.contents.is_empty() {
+            return "(empty resource)\n".to_string();
+        }
+
+        let mut output = String::new();
+        for (index, contents) in result.contents.iter().enumerate() {
+            if result.contents.len() > 1 {
+                let _ = writeln!(output, "{}", self.label(&format!("contents[{index}]")));
+            }
+            output.push_str(&self.resource(contents));
+            if !output.ends_with('\n') {
+                output.push('\n');
+            }
+        }
         output
     }
 
@@ -449,9 +472,44 @@ fn ansi_extra(styled: &str, plain_len: usize) -> usize {
 
 #[cfg(test)]
 mod tests {
+    use rmcp::model::{ReadResourceResult, ResourceContents};
     use serde_json::json;
 
-    use super::schema_summary;
+    use super::{Formatter, schema_summary};
+
+    fn read_resource_result() -> ReadResourceResult {
+        ReadResourceResult::new(vec![
+            ResourceContents::text("first", "file:///one.txt"),
+            ResourceContents::text("second", "file:///two.txt"),
+        ])
+    }
+
+    #[test]
+    fn renders_every_resource_content() {
+        let output = Formatter::new(false, false).read_resource(&read_resource_result());
+
+        assert!(output.contains("file:///one.txt"), "{output}");
+        assert!(output.contains("first"), "{output}");
+        assert!(output.contains("file:///two.txt"), "{output}");
+        assert!(output.contains("second"), "{output}");
+    }
+
+    #[test]
+    fn renders_resource_as_json_in_json_mode() {
+        let output = Formatter::new(false, true).read_resource(&read_resource_result());
+
+        let parsed: serde_json::Value = serde_json::from_str(&output).expect("valid JSON");
+        assert_eq!(parsed["contents"].as_array().map(Vec::len), Some(2));
+    }
+
+    #[test]
+    fn renders_empty_resource() {
+        let result = ReadResourceResult::new(vec![]);
+        assert_eq!(
+            Formatter::new(false, false).read_resource(&result),
+            "(empty resource)\n"
+        );
+    }
 
     #[test]
     fn summarizes_schema_properties() {

@@ -2,10 +2,11 @@ use mcp_cli::{client_handler::InspectorClient, session::McpSession, shell::parse
 use rmcp::{
     ErrorData as McpError, RoleServer, ServerHandler, ServiceExt,
     model::{
-        CallToolRequestParams, CallToolResult, Content, GetPromptRequestParams, GetPromptResult,
-        ListPromptsResult, ListToolsResult, PaginatedRequestParams, Prompt, PromptArgument,
-        PromptMessage, PromptMessageContent, PromptMessageRole, ServerCapabilities, ServerInfo,
-        Tool,
+        AnnotateAble, CallToolRequestParams, CallToolResult, Content, GetPromptRequestParams,
+        GetPromptResult, ListPromptsResult, ListResourcesResult, ListToolsResult,
+        PaginatedRequestParams, Prompt, PromptArgument, PromptMessage, PromptMessageContent,
+        PromptMessageRole, RawResource, ReadResourceRequestParams, ReadResourceResult,
+        ResourceContents, ServerCapabilities, ServerInfo, Tool,
     },
     service::{MaybeSendFuture, RequestContext},
 };
@@ -26,9 +27,48 @@ impl ServerHandler for FakeServer {
             ServerCapabilities::builder()
                 .enable_tools()
                 .enable_prompts()
+                .enable_resources()
                 .build(),
         )
         .with_instructions("fake test server")
+    }
+
+    fn list_resources(
+        &self,
+        _request: Option<PaginatedRequestParams>,
+        _context: RequestContext<RoleServer>,
+    ) -> impl std::future::Future<Output = Result<ListResourcesResult, McpError>> + MaybeSendFuture + '_
+    {
+        std::future::ready(Ok(ListResourcesResult {
+            resources: vec![
+                RawResource::new("file:///single.txt", "single").no_annotation(),
+                RawResource::new("file:///pair.txt", "pair").no_annotation(),
+            ],
+            ..Default::default()
+        }))
+    }
+
+    async fn read_resource(
+        &self,
+        request: ReadResourceRequestParams,
+        _context: RequestContext<RoleServer>,
+    ) -> Result<ReadResourceResult, McpError> {
+        match request.uri.as_ref() {
+            "file:///single.txt" => Ok(ReadResourceResult::new(vec![ResourceContents::text(
+                "only content",
+                "file:///single.txt",
+            )])),
+            // A read that returns more than one content item: the CLI used to
+            // discard everything after the first.
+            "file:///pair.txt" => Ok(ReadResourceResult::new(vec![
+                ResourceContents::text("first content", "file:///pair.txt"),
+                ResourceContents::text("second content", "file:///pair.txt"),
+            ])),
+            other => Err(McpError::resource_not_found(
+                format!("unknown resource: {other}"),
+                Some(json!({"uri": other})),
+            )),
+        }
     }
 
     fn list_prompts(
@@ -228,6 +268,37 @@ async fn session_lists_and_renders_prompts() -> anyhow::Result<()> {
 
     let missing_prompt = session.get_prompt("nope", json!({})).await;
     assert!(missing_prompt.is_err());
+
+    session.close().await?;
+    let _ = server_task.await??;
+    Ok(())
+}
+
+#[tokio::test]
+async fn session_reads_every_resource_content() -> anyhow::Result<()> {
+    let (server_transport, client_transport) = tokio::io::duplex(8192);
+    let server_task = tokio::spawn(async move {
+        let server = FakeServer::new().serve(server_transport).await?;
+        Ok::<_, anyhow::Error>(server.waiting().await?)
+    });
+
+    let handler = InspectorClient::new(true);
+    let running = handler.clone().serve(client_transport).await?;
+    let mut session = McpSession::from_running(running, handler).await?;
+
+    assert_eq!(session.resources().len(), 2);
+
+    let single = session.get_resource("file:///single.txt").await?;
+    assert_eq!(single.contents.len(), 1);
+
+    let pair = session.get_resource("file:///pair.txt").await?;
+    assert_eq!(pair.contents.len(), 2);
+    let rendered = serde_json::to_value(&pair)?.to_string();
+    assert!(rendered.contains("first content"));
+    assert!(rendered.contains("second content"));
+
+    let missing = session.get_resource("file:///nope.txt").await;
+    assert!(missing.is_err());
 
     session.close().await?;
     let _ = server_task.await??;

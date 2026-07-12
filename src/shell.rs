@@ -287,7 +287,7 @@ impl Shell {
             }
             ShellCommand::Resource { uri } => {
                 let result = session.get_resource(&uri).await?;
-                println!("{}", self.formatter.resource(&result));
+                println!("{}", self.formatter.read_resource(&result));
             }
             ShellCommand::Tool { name, arguments } => {
                 let result = session.call_tool(&name, arguments).await?;
